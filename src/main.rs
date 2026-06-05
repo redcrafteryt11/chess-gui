@@ -1,5 +1,6 @@
 mod app;
 mod board;
+mod fen;
 mod game;
 mod uci;
 

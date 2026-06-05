@@ -11,19 +11,6 @@ pub enum PlayerColor {
     Black,
 }
 
-#[derive(Debug, Clone)]
-pub struct GameState {
-    pub fen: String,
-    pub moves: Vec<String>,
-    pub mode: GameMode,
-    pub human_color: PlayerColor,
-    pub side_to_move: PlayerColor,
-    pub status: GameStatus,
-    pub analysis_lines: Vec<String>,
-    pub current_depth: u32,
-    pub current_score: i32,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameStatus {
     Playing,
@@ -32,14 +19,28 @@ pub enum GameStatus {
     Waiting,
 }
 
+#[derive(Debug, Clone)]
+pub struct GameState {
+    pub start_fen: String,
+    pub current_fen: String,
+    pub moves: Vec<String>,
+    pub mode: GameMode,
+    pub human_color: PlayerColor,
+    pub status: GameStatus,
+    pub analysis_lines: Vec<String>,
+    pub current_depth: u32,
+    pub current_score: i32,
+}
+
 impl GameState {
     pub fn new() -> Self {
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
         Self {
-            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
+            start_fen: fen.clone(),
+            current_fen: fen,
             moves: Vec::new(),
             mode: GameMode::HumanVsEngine,
             human_color: PlayerColor::White,
-            side_to_move: PlayerColor::White,
             status: GameStatus::Playing,
             analysis_lines: Vec::new(),
             current_depth: 0,
@@ -49,24 +50,26 @@ impl GameState {
 
     pub fn position_string(&self) -> String {
         if self.moves.is_empty() {
-            format!("position fen {}", self.fen)
+            format!("position fen {}", self.start_fen)
         } else {
-            format!("position fen {} moves {}", self.fen, self.moves.join(" "))
+            format!("position fen {} moves {}", self.start_fen, self.moves.join(" "))
         }
     }
 
-    pub fn push_move(&mut self, mv: &str) {
+    pub fn side_to_move_white(&self) -> bool {
+        self.current_fen.split_whitespace().nth(1).map_or(true, |s| s == "w")
+    }
+
+    pub fn push_move(&mut self, mv: &str, new_fen: String) {
         self.moves.push(mv.to_string());
-        self.side_to_move = match self.side_to_move {
-            PlayerColor::White => PlayerColor::Black,
-            PlayerColor::Black => PlayerColor::White,
-        };
+        self.current_fen = new_fen;
     }
 
     pub fn reset(&mut self) {
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
+        self.start_fen = fen.clone();
+        self.current_fen = fen;
         self.moves.clear();
-        self.fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
-        self.side_to_move = PlayerColor::White;
         self.status = GameStatus::Playing;
         self.analysis_lines.clear();
         self.current_depth = 0;
@@ -74,13 +77,9 @@ impl GameState {
     }
 
     pub fn set_fen(&mut self, fen: &str) {
-        self.fen = fen.to_string();
+        self.start_fen = fen.to_string();
+        self.current_fen = fen.to_string();
         self.moves.clear();
-        self.side_to_move = if fen.contains(" b ") {
-            PlayerColor::Black
-        } else {
-            PlayerColor::White
-        };
         self.status = GameStatus::Playing;
         self.analysis_lines.clear();
     }
@@ -89,7 +88,13 @@ impl GameState {
         match self.mode {
             GameMode::Analysis => true,
             GameMode::EngineVsEngine => false,
-            GameMode::HumanVsEngine => self.side_to_move == self.human_color,
+            GameMode::HumanVsEngine => {
+                let white = self.side_to_move_white();
+                match self.human_color {
+                    PlayerColor::White => white,
+                    PlayerColor::Black => !white,
+                }
+            }
         }
     }
 }

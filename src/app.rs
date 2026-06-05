@@ -1,6 +1,7 @@
 use egui::{CentralPanel, Color32, Context, RichText, ScrollArea, SidePanel, TopBottomPanel};
 use tokio::runtime::Runtime;
-use crate::board::{BoardState, BoardWidget, piece_at_fen, side_to_move_white, sq_to_uci};
+use crate::board::{BoardState, BoardWidget, piece_at_fen, sq_to_uci};
+use crate::fen::apply_move;
 use crate::game::{GameMode, GameState, GameStatus};
 use crate::uci::{UciEngine, UciOutput};
 
@@ -37,9 +38,7 @@ impl ChessApp {
     }
 
     fn connect_engine(&mut self) {
-        match self.rt.block_on(async {
-            UciEngine::launch(&self.engine_path)
-        }) {
+        match self.rt.block_on(async { UciEngine::launch(&self.engine_path) }) {
             Ok(engine) => {
                 engine.init();
                 self.engine = Some(engine);
@@ -61,7 +60,10 @@ impl ChessApp {
             match msg {
                 UciOutput::BestMove(mv) => {
                     if mv != "0000" && self.engine_thinking {
-                        self.apply_move(&mv);
+                        let new_fen = apply_move(&self.game.current_fen, &mv);
+                        self.game.push_move(&mv, new_fen);
+                        self.board.last_move = Some((sq_from_uci(&mv[..2]), sq_from_uci(&mv[2..4])));
+                        self.move_history.push(mv);
                     }
                     self.engine_thinking = false;
                 }
@@ -83,18 +85,6 @@ impl ChessApp {
         }
     }
 
-    fn apply_move(&mut self, mv: &str) {
-        self.game.push_move(mv);
-        self.board.last_move = Some((
-            sq_from_uci(&mv[..2]),
-            sq_from_uci(&mv[2..4]),
-        ));
-        self.move_history.push(mv.to_string());
-        self.selected_sq = None;
-        self.board.selected = None;
-        self.board.legal_hints.clear();
-    }
-
     fn request_engine_move(&mut self, depth: u32) {
         let Some(engine) = &self.engine else {
             self.log.push("No engine connected".to_string());
@@ -106,8 +96,7 @@ impl ChessApp {
 
     fn handle_square_click(&mut self, sq: u8) {
         if !self.game.is_human_turn() { return; }
-
-        let white_turn = side_to_move_white(&fen_after_moves(&self.game));
+        let white_turn = self.game.side_to_move_white();
 
         match self.selected_sq {
             Some(from) if from == sq => {
@@ -116,9 +105,15 @@ impl ChessApp {
                 self.board.legal_hints.clear();
             }
             Some(from) => {
-                let mv = sq_to_uci(from) + &sq_to_uci(sq);
-                let mv = maybe_add_promotion(&mv, from, sq, white_turn, &self.game);
-                self.apply_move(&mv);
+                let base_mv = sq_to_uci(from) + &sq_to_uci(sq);
+                let mv = maybe_add_promotion(&base_mv, from, sq, white_turn, &self.game.current_fen);
+                let new_fen = apply_move(&self.game.current_fen, &mv);
+                self.game.push_move(&mv, new_fen);
+                self.board.last_move = Some((from, sq));
+                self.move_history.push(mv.clone());
+                self.selected_sq = None;
+                self.board.selected = None;
+                self.board.legal_hints.clear();
                 self.game.analysis_lines.clear();
 
                 if !self.engine_thinking {
@@ -135,7 +130,7 @@ impl ChessApp {
                 }
             }
             None => {
-                let piece = piece_at_fen(&fen_after_moves(&self.game), sq);
+                let piece = piece_at_fen(&self.game.current_fen, sq);
                 if piece.map_or(false, |(w, _)| w == white_turn) {
                     self.selected_sq = Some(sq);
                     self.board.selected = Some(sq);
@@ -227,7 +222,7 @@ impl eframe::App for ChessApp {
             ScrollArea::vertical().id_salt("hist").max_height(200.0).show(ui, |ui| {
                 for (i, mv) in self.move_history.iter().enumerate() {
                     if i % 2 == 0 {
-                        ui.label(RichText::new(format!("{}. {}", i / 2 + 1, mv)).monospace());
+                        ui.label(RichText::new(format!("{}. {mv}", i / 2 + 1)).monospace());
                     } else {
                         ui.label(RichText::new(format!("   {mv}")).monospace());
                     }
@@ -264,7 +259,7 @@ impl eframe::App for ChessApp {
         CentralPanel::default().show(ctx, |ui| {
             let interactive = self.game.is_human_turn() && self.game.status == GameStatus::Playing;
             let flip = self.board.flipped;
-            let fen = fen_after_moves(&self.game);
+            let fen = self.game.current_fen.clone();
 
             let mut widget = BoardWidget {
                 fen: &fen,
@@ -297,24 +292,14 @@ fn mode_label(mode: &GameMode) -> &'static str {
 
 fn sq_from_uci(s: &str) -> u8 {
     let b = s.as_bytes();
-    let file = b[0] - b'a';
-    let rank = b[1] - b'1';
-    rank * 8 + file
+    (b[1] - b'1') * 8 + (b[0] - b'a')
 }
 
-fn fen_after_moves(game: &GameState) -> String {
-    game.fen.clone()
-}
-
-fn maybe_add_promotion(mv: &str, from: u8, to: u8, white_turn: bool, game: &GameState) -> String {
+fn maybe_add_promotion(mv: &str, from: u8, to: u8, white_turn: bool, fen: &str) -> String {
+    let is_pawn = piece_at_fen(fen, from).map_or(false, |(_, p)| p == 0);
     let from_rank = from / 8;
     let to_rank = to / 8;
-    let is_pawn = piece_at_fen(&game.fen, from).map_or(false, |(_, p)| p == 0);
-    let is_promotion = is_pawn && ((white_turn && from_rank == 6 && to_rank == 7)
+    let is_promo = is_pawn && ((white_turn && from_rank == 6 && to_rank == 7)
         || (!white_turn && from_rank == 1 && to_rank == 0));
-    if is_promotion {
-        format!("{mv}q")
-    } else {
-        mv.to_string()
-    }
+    if is_promo { format!("{mv}q") } else { mv.to_string() }
 }

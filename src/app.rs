@@ -158,6 +158,15 @@ impl eframe::App for ChessApp {
             ui.horizontal(|ui| {
                 ui.label("Engine:");
                 ui.text_edit_singleline(&mut self.engine_path);
+                if ui.button("Browse…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Executable", &["exe", ""])
+                        .set_title("Select chess engine executable")
+                        .pick_file()
+                    {
+                        self.engine_path = path.to_string_lossy().to_string();
+                    }
+                }
                 if ui.button("Connect").clicked() {
                     self.connect_engine();
                 }

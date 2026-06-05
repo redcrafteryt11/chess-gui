@@ -1,5 +1,4 @@
-use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
-use crate::game::PlayerColor;
+use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 const LIGHT: Color32 = Color32::from_rgb(240, 217, 181);
 const DARK:  Color32 = Color32::from_rgb(181, 136, 99);
@@ -64,7 +63,7 @@ impl<'a> BoardWidget<'a> {
                 } else if self.state.legal_hints.contains(&sq) {
                     let center = sq_rect.center();
                     if pieces[sq as usize].is_some() {
-                        painter.rect_stroke(sq_rect, 0.0, Stroke::new(3.0, SEL));
+                        painter.rect_stroke(sq_rect, 0.0, Stroke::new(3.0, SEL), StrokeKind::Outside);
                     } else {
                         painter.circle_filled(center, sq_size * 0.15, HINT);
                     }

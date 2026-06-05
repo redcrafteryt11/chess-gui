@@ -1,7 +1,7 @@
 use egui::{CentralPanel, Color32, Context, RichText, ScrollArea, SidePanel, TopBottomPanel};
 use tokio::runtime::Runtime;
 use crate::board::{BoardState, BoardWidget, piece_at_fen, side_to_move_white, sq_to_uci};
-use crate::game::{GameMode, GameState, GameStatus, PlayerColor};
+use crate::game::{GameMode, GameState, GameStatus};
 use crate::uci::{UciEngine, UciOutput};
 
 pub struct ChessApp {
@@ -53,7 +53,11 @@ impl ChessApp {
 
     fn poll_engine(&mut self) {
         let Some(engine) = &mut self.engine else { return };
+        let mut messages = Vec::new();
         while let Ok(msg) = engine.output_rx.try_recv() {
+            messages.push(msg);
+        }
+        for msg in messages {
             match msg {
                 UciOutput::BestMove(mv) => {
                     if mv != "0000" && self.engine_thinking {
